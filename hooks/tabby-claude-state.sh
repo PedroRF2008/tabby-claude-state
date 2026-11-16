@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tabby-claude-state-version: 0.3.0
+# tabby-claude-state-version: 0.3.1
 #
 # Reports Claude Code's state to the terminal it runs in, using invisible
 # in-band escape sequences (iTerm2/WezTerm "SetUserVar" convention):
