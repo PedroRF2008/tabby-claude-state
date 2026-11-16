@@ -2,19 +2,31 @@
 # Installs the tabby-claude-state hook for Claude Code on this Linux/WSL/SSH host.
 #   bash scripts/install-hooks.sh            install / update (idempotent)
 #   bash scripts/install-hooks.sh --uninstall
-# Backs up ~/.claude/settings.json first; only touches hook entries that
-# reference tabby-claude-state.sh.
+# Backs up settings.json first; only touches hook entries that reference
+# tabby-claude-state.sh.
+#
+# The hook script always lives in $HOME/.claude/hooks and is referenced as
+# "$HOME/.claude/hooks/…", whatever CLAUDE_CONFIG_DIR says: tools such as CCM
+# run Claude with CLAUDE_CONFIG_DIR pointing at a per-login directory whose
+# settings.json is a link to the real one, so the command must resolve the same
+# under every identity. CLAUDE_CONFIG_DIR only decides which settings.json to
+# edit, and a linked settings.json is edited at its real location.
 set -euo pipefail
 
 SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-HOOK_DST="$CLAUDE_DIR/hooks/tabby-claude-state.sh"
-SETTINGS="$CLAUDE_DIR/settings.json"
+HOOK_DIR="$HOME/.claude/hooks"
+HOOK_DST="$HOOK_DIR/tabby-claude-state.sh"
+SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+if [ -L "$SETTINGS" ]; then
+  real="$(readlink -f "$SETTINGS")"
+  echo "settings.json is a link -> $real"
+  SETTINGS="$real"
+fi
 MODE="${1:-install}"
 
 command -v python3 >/dev/null || { echo "python3 is required to edit settings.json safely" >&2; exit 1; }
 
-mkdir -p "$CLAUDE_DIR/hooks"
+mkdir -p "$HOOK_DIR" "$(dirname "$SETTINGS")"
 if [ "$MODE" != "--uninstall" ]; then
   # Copy with LF line endings even if the repo was checked out with CRLF.
   tr -d '\r' <"$SRC_DIR/hooks/tabby-claude-state.sh" >"$HOOK_DST"
@@ -34,9 +46,9 @@ with open(path) as f:
     settings = json.load(f)
 
 MARK = "tabby-claude-state.sh"
+# Literal $HOME, expanded by the shell at hook time: identical under every
+# CLAUDE_CONFIG_DIR (CCM Profiles, per-account config dirs).
 CMD = '"$HOME/.claude/hooks/tabby-claude-state.sh" '
-if "CLAUDE_CONFIG_DIR" in __import__("os").environ:
-    CMD = '"$CLAUDE_CONFIG_DIR/hooks/tabby-claude-state.sh" '
 
 # event -> (matcher or None, state argument)
 EVENTS = {

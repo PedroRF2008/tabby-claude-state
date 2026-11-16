@@ -20,6 +20,12 @@ export interface HookStatus {
     hookVersion: string
     /** Hook entries present in ~/.claude/settings.json */
     configured: boolean
+    /** CCM (claude-credentials-manager) is set up on this target */
+    ccm: boolean
+    /** CCM Local Profiles whose settings.json links to the real one (hooks apply) */
+    ccmShared: string[]
+    /** CCM Local Profiles with their own settings.json (hooks won't run there) */
+    ccmUnlinked: string[]
     error?: string
 }
 
@@ -33,16 +39,36 @@ export const PLUGIN_VERSION: string = (() => {
 })()
 const INSTALL_SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'install-hooks.sh')
 
+// Hook script: always $HOME/.claude/hooks (see install-hooks.sh). Settings: the
+// config dir's settings.json, followed through a link.
+// CCM (claude-credentials-manager) Local Profiles run Claude with
+// CLAUDE_CONFIG_DIR=<ccm config>/logins/<name>, whose settings.json is a link to
+// the real one — that link is what carries our hooks into those Profiles, so we
+// report any Local Profile where it's missing. Published Profiles share
+// ~/.claude and need nothing.
 const STATUS_SCRIPT = `
-d="\${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+s="$(readlink -f "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" 2>/dev/null)"
+h="$HOME/.claude/hooks/tabby-claude-state.sh"
 echo "reachable=yes"
 command -v python3 >/dev/null 2>&1 && echo "python=yes" || echo "python=no"
 command -v claude >/dev/null 2>&1 && echo "claude=yes" || echo "claude=no"
-if [ -f "$d/hooks/tabby-claude-state.sh" ]; then
-  v="$(sed -n 's/^# tabby-claude-state-version: //p' "$d/hooks/tabby-claude-state.sh" | head -1)"
+if [ -f "$h" ]; then
+  v="$(sed -n 's/^# tabby-claude-state-version: //p' "$h" | head -1)"
   echo "hookVersion=\${v:-0.1.0}"
 fi
-grep -q 'tabby-claude-state.sh' "$d/settings.json" 2>/dev/null && echo "configured=yes" || echo "configured=no"
+grep -q 'tabby-claude-state.sh' "$s" 2>/dev/null && echo "configured=yes" || echo "configured=no"
+ccm_dir="\${CCM_CONFIG_DIR:-\${XDG_CONFIG_HOME:-$HOME/.config}/ccm}"
+if [ -d "$ccm_dir" ]; then
+  echo "ccm=yes"
+  shared=""; unlinked=""
+  for l in "$ccm_dir"/logins/*/; do
+    [ -d "$l" ] || continue
+    n="$(basename "$l")"
+    if [ -n "$s" ] && [ "$(readlink -f "$l/settings.json" 2>/dev/null)" = "$s" ]; then shared="$shared,$n"; else unlinked="$unlinked,$n"; fi
+  done
+  echo "ccmShared=\${shared#,}"
+  echo "ccmUnlinked=\${unlinked#,}"
+fi
 `
 
 /** Detects, installs and removes the Claude Code hook in WSL distros (or locally on Linux/macOS). */
@@ -73,7 +99,11 @@ export class HookInstallerService {
     }
 
     async status (target: HookTarget): Promise<HookStatus> {
-        const empty: HookStatus = { reachable: false, python: false, claude: false, hookVersion: '', configured: false }
+        const empty: HookStatus = {
+            reachable: false, python: false, claude: false, hookVersion: '', configured: false,
+            ccm: false, ccmShared: [], ccmUnlinked: [],
+        }
+        const list = (v?: string) => (v ?? '').split(',').map(x => x.trim()).filter(Boolean)
         try {
             const out = await this.runBash(target, STATUS_SCRIPT, 60000)
             const kv: Record<string, string> = {}
@@ -89,6 +119,9 @@ export class HookInstallerService {
                 claude: kv.claude === 'yes',
                 hookVersion: kv.hookVersion ?? '',
                 configured: kv.configured === 'yes',
+                ccm: kv.ccm === 'yes',
+                ccmShared: list(kv.ccmShared),
+                ccmUnlinked: list(kv.ccmUnlinked),
             }
         } catch (e: any) {
             return { ...empty, error: String(e?.message ?? e) }

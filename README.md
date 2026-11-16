@@ -60,6 +60,16 @@ The state travels inside the tab's own output, so each tab only ever shows its o
 
 Hook mapping: `UserPromptSubmit`/`PreToolUse`/`PostToolUse(Failure)` → working, `PermissionRequest`/`Notification(permission_prompt, elicitation_dialog)` → needs you, `Stop` → done, `StopFailure` → error, `SessionEnd` → idle.
 
+## Multiple accounts (`CLAUDE_CONFIG_DIR`, CCM)
+
+The hook is always installed at `~/.claude/hooks/` and referenced as `"$HOME/.claude/hooks/…"`, so it runs the same under every identity. The installer edits the `settings.json` of `$CLAUDE_CONFIG_DIR` (or `~/.claude`), and if that file is a link it edits the file the link points to.
+
+- **Per-account config directories**: run `install-hooks.sh` once with each `CLAUDE_CONFIG_DIR` whose `settings.json` is a separate file.
+- **CCM (claude-credentials-manager)**:
+  - **Published Profiles** share `~/.claude`, so they pick the hooks up automatically.
+  - **Local Profiles** link their `settings.json` to the real one, so they pick them up too.
+  - The settings page lists your Local Profiles and warns about any whose `settings.json` is no longer a link.
+
 ## Configuration
 
 Everything is on Settings → Claude Code. The values are stored in Tabby's `config.yaml` under `claudeState:`.

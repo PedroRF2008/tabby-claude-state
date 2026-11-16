@@ -57,6 +57,21 @@ const TEMPLATE = `
       </button>
       <button class="btn btn-secondary ms-2" (click)="uninstall(row)" [disabled]="row.busy || !isInstalled(row)">Remove</button>
     </div>
+    <div class="small mt-1" *ngIf="row.status?.ccm">
+      <span class="ok" *ngIf="row.status!.ccmShared.length">
+        <i class="fas fa-check-circle me-1"></i>CCM: Published Profiles and Local Profile{{row.status!.ccmShared.length > 1 ? 's' : ''}}
+        {{row.status!.ccmShared.join(', ')}} use these hooks.
+      </span>
+      <span class="ok" *ngIf="!row.status!.ccmShared.length && !row.status!.ccmUnlinked.length">
+        <i class="fas fa-check-circle me-1"></i>CCM: Published Profiles use these hooks.
+      </span>
+      <div class="warn" *ngIf="row.status!.ccmUnlinked.length">
+        <i class="fas fa-exclamation-circle me-1"></i>CCM Local Profile{{row.status!.ccmUnlinked.length > 1 ? 's' : ''}}
+        {{row.status!.ccmUnlinked.join(', ')}}: <code>settings.json</code> isn't linked to the real one, so tabs
+        won't change colour there. <code>ccm doctor</code> reports it; CCM leaves the file alone
+        on purpose, so move it aside and run <code>ccm use</code> to get the link back.
+      </div>
+    </div>
     <pre class="tcs-log mt-2" *ngIf="row.log">{{row.log}}</pre>
   </div>
   <div class="text-muted small mt-1" *ngIf="isWindows">
