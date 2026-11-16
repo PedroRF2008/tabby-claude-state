@@ -146,26 +146,52 @@ export class HookInstallerService {
     }
 
     /** Runs a script in a login bash (so ~/.local/bin etc. are on PATH), fed via stdin to avoid quoting issues. */
-    private runBash (target: HookTarget, script: string, timeout: number): Promise<string> {
+    runBash (target: HookTarget, script: string, timeout: number): Promise<string> {
+        return this.runBashRaw(target, script, timeout).then(r => {
+            if (r.code !== 0) {
+                throw new Error(r.stderr.trim() || r.stdout.trim() || `exit code ${r.code}`)
+            }
+            return r.stdout
+        })
+    }
+
+    /** Like runBash, but never rejects on a non-zero exit: callers that need the exit code (e.g. `ccm list --json`). */
+    runBashRaw (target: HookTarget, script: string, timeout: number): Promise<ExecResult> {
         if (target.kind === 'wsl') {
-            return this.exec('wsl.exe', ['-d', target.distro!, '-e', 'bash', '-l', '-s'], script, timeout)
+            return this.execRaw('wsl.exe', ['-d', target.distro!, '-e', 'bash', '-l', '-s'], script, timeout)
         }
-        return this.exec('bash', ['-l', '-s'], script, timeout)
+        return this.execRaw('bash', ['-l', '-s'], script, timeout)
     }
 
     private exec (cmd: string, args: string[], stdin: string, timeout: number, encoding: BufferEncoding = 'utf8'): Promise<string> {
+        return this.execRaw(cmd, args, stdin, timeout, encoding).then(r => {
+            if (r.code !== 0) {
+                throw new Error(r.stderr.replace(/\0/g, '').trim() || r.stdout.trim() || `exit code ${r.code}`)
+            }
+            return r.stdout
+        })
+    }
+
+    private execRaw (cmd: string, args: string[], stdin: string, timeout: number, encoding: BufferEncoding = 'utf8'): Promise<ExecResult> {
         return new Promise((resolve, reject) => {
             const child = childProcess.execFile(cmd, args, { timeout, windowsHide: true, encoding: 'buffer', maxBuffer: 4 * 1024 * 1024 },
-                (err, stdout, stderr) => {
+                (err: any, stdout, stderr) => {
                     const out = Buffer.from(stdout as any).toString(encoding)
-                    if (err) {
-                        const errText = Buffer.from(stderr as any).toString(encoding).replace(/\0/g, '').trim()
-                        reject(new Error(errText || out.trim() || err.message))
+                    const errText = Buffer.from(stderr as any).toString(encoding)
+                    if (err && typeof err.code !== 'number') {
+                        // Spawn failure or timeout (code is a string like 'ENOENT', or killed)
+                        reject(new Error(errText.replace(/\0/g, '').trim() || err.message))
                         return
                     }
-                    resolve(out)
+                    resolve({ code: err ? err.code : 0, stdout: out, stderr: errText })
                 })
             child.stdin?.end(stdin.replace(/\r\n/g, '\n'))
         })
     }
+}
+
+export interface ExecResult {
+    code: number
+    stdout: string
+    stderr: string
 }

@@ -1,6 +1,6 @@
 {
   "name": "tabby-claude-state",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Claude Code session state on Tabby tabs: colours, progress, native notifications and a settings page that installs the hooks into WSL for you.",
   "keywords": [
     "tabby-plugin",
@@ -19,7 +19,7 @@
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -p . --watch",
-    "test": "node test/load.test.js && node test/middleware.test.js",
+    "test": "node test/load.test.js && node test/middleware.test.js && node test/claudeLaunch.test.js",
     "prepublishOnly": "npm run build && npm test"
   },
   "license": "MIT",
@@ -30,7 +30,8 @@
     "rxjs": "*",
     "tabby-core": "*",
     "tabby-settings": "*",
-    "tabby-terminal": "*"
+    "tabby-terminal": "*",
+    "tabby-local": "*"
   },
   "devDependencies": {
     "@angular/common": "^15.2.10",
@@ -39,6 +40,7 @@
     "@types/node": "^20.14.0",
     "rxjs": "^7.8.1",
     "tabby-core": "^1.0.231-nightly.0",
+    "tabby-local": "^1.0.231-nightly.0",
     "tabby-settings": "^1.0.231-nightly.0",
     "tabby-terminal": "^1.0.231-nightly.0",
     "typescript": "~5.4.5"

@@ -9,9 +9,10 @@ class Stub {} ; class SessionMiddleware { constructor () {} }
 class TerminalDecorator { detach () {} subscribeUntilDetached () {} }
 const Platform = { Windows: 'Windows' }
 const stubs = {
-  'tabby-core': { __esModule: true, default: class TabbyCoreModule {}, ConfigProvider: Stub, ConfigService: Stub, HostWindowService: Stub, AppService: Stub, HostAppService: Stub, BaseTabComponent: Stub, Platform },
+  'tabby-core': { __esModule: true, default: class TabbyCoreModule {}, ConfigProvider: Stub, ConfigService: Stub, HostWindowService: Stub, AppService: Stub, HostAppService: Stub, BaseTabComponent: Stub, NotificationsService: Stub, ProfilesService: Stub, Platform },
   'tabby-terminal': { TerminalDecorator, SessionMiddleware },
   'tabby-settings': { SettingsTabProvider: Stub },
+  'tabby-local': { ShellProvider: class ShellProvider {} },
   '@angular/common': { CommonModule: class CommonModule {} },   // needs JIT compiler outside Tabby
   '@angular/forms': { FormsModule: class FormsModule {} },
 }

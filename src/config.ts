@@ -34,6 +34,16 @@ export class ClaudeStateConfigProvider extends ConfigProvider {
                 doneMinSeconds: 0,
                 silent: false,
             },
+            /** "Claude · <CCM Profile>" entries in Tabby's profile list (WSL, via `ccm run`) */
+            launch: {
+                enabled: true,
+                /** WSL distro to offer; '' = every distro */
+                distro: '',
+                /** WSL path the new tab starts in */
+                folder: '~',
+                /** Start Claude with --dangerously-skip-permissions */
+                skipPermissions: true,
+            },
             /** "done" stays until you look at the tab, then clears after this delay */
             doneClearDelayMs: 2500,
             /** Log every state change to DevTools console */

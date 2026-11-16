@@ -4,6 +4,7 @@ import { BaseTabComponent, ConfigService, HostWindowService } from 'tabby-core'
 import { BaseTerminalTabComponent, TerminalDecorator } from 'tabby-terminal'
 import { ClaudeState, ClaudeStateEvent, ClaudeStateMiddleware } from './middleware'
 import { ClaudeNotifierService } from './notifier.service'
+import { ccmProfileFromTabbyProfileId } from './claudeLaunch'
 
 const SWEEP_INTERVAL_MS = 250
 const SWEEP_STEP = 4
@@ -116,6 +117,7 @@ class TabStateController {
                 elapsedMs,
                 tab: target,
                 pane: this.terminal,
+                ccmProfile: ccmProfileFromTabbyProfileId((this.terminal as any).profile?.id),
             })
         }
 

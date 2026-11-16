@@ -1,5 +1,8 @@
-import { ChangeDetectorRef, Component, NgZone, OnInit } from '@angular/core'
-import { ConfigService } from 'tabby-core'
+import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit } from '@angular/core'
+import { Subscription } from 'rxjs'
+import { ConfigService, NotificationsService, ProfilesService } from 'tabby-core'
+import { CcmService, DistroCcm } from './ccm.service'
+import { CcmProfile, shellId } from './claudeLaunch'
 import { DEFAULT_COLORS } from './config'
 import { HookInstallerService, HookStatus, HookTarget, PLUGIN_VERSION } from './hookInstaller.service'
 import { ClaudeState } from './middleware'
@@ -171,6 +174,93 @@ const TEMPLATE = `
     <input class="form-control tcs-num" type="number" min="0" step="500" [(ngModel)]="cfg.doneClearDelayMs" (ngModelChange)="save()">
   </div>
 
+  <!-- ───────────── Launch ───────────── -->
+  <h4 class="mt-4">4 · Launch Claude Code</h4>
+  <div class="text-muted mb-2">
+    Open Claude Code in WSL as a specific CCM Profile (<code>ccm run &lt;profile&gt; -- claude</code>).
+    These also appear in Tabby's profile picker (<strong>Ctrl+Shift+E</strong>) and New tab menu as
+    "Claude · &lt;profile&gt;".
+  </div>
+
+  <div class="form-line">
+    <div class="header"><div class="title">Show Claude Code profiles</div></div>
+    <toggle [(ngModel)]="cfg.launch.enabled" (ngModelChange)="save()"></toggle>
+  </div>
+
+  <div class="form-line" *ngIf="ccmDistros.length > 1">
+    <div class="header">
+      <div class="title">WSL distro</div>
+      <div class="description">Which distro's CCM Profiles to offer</div>
+    </div>
+    <select class="form-control tcs-select" [(ngModel)]="cfg.launch.distro" (ngModelChange)="save()">
+      <option value="">All distros</option>
+      <option *ngFor="let d of ccmDistros" [value]="d.target.distro">{{d.target.distro}}</option>
+    </select>
+  </div>
+
+  <div class="form-line">
+    <div class="header">
+      <div class="title">Start folder</div>
+      <div class="description">WSL path the new tab opens in (<code>~</code> is your home)</div>
+    </div>
+    <input class="form-control tcs-folder" type="text" [(ngModel)]="cfg.launch.folder" (ngModelChange)="save()" placeholder="~">
+  </div>
+
+  <div class="form-line">
+    <div class="header">
+      <div class="title">Skip permission prompts</div>
+      <div class="description">Start Claude with <code>--dangerously-skip-permissions</code></div>
+    </div>
+    <toggle [(ngModel)]="cfg.launch.skipPermissions" (ngModelChange)="save()"></toggle>
+  </div>
+
+  <div class="d-flex align-items-center mt-3 mb-2">
+    <strong class="flex-grow-1">CCM Profiles</strong>
+    <button class="btn btn-secondary" (click)="refreshCcm()" [disabled]="ccmBusy" title="Re-read ccm list">
+      <i class="fas fa-sync me-1" [class.fa-spin]="ccmBusy"></i>Refresh
+    </button>
+  </div>
+  <div *ngIf="ccmBusy && !ccmDistros.length" class="text-muted p-2"><i class="fas fa-circle-notch fa-spin me-2"></i>Asking CCM…</div>
+  <div class="tcs-target" *ngFor="let d of visibleCcmDistros()">
+    <div class="title mb-1"><strong>WSL · {{d.target.distro}}</strong>
+      <span class="small text-muted" *ngIf="d.state?.kind === 'ok'"> · Store: {{storeText(d)}}</span>
+    </div>
+    <div *ngIf="!d.state" class="small text-muted"><i class="fas fa-circle-notch fa-spin me-1"></i>Checking…</div>
+    <div *ngIf="d.state?.kind === 'missing'" class="small warn">
+      <i class="fas fa-exclamation-circle me-1"></i>CCM isn't installed here — only plain Claude Code is offered.
+    </div>
+    <div *ngIf="d.state?.kind === 'too-old'" class="small warn">
+      <i class="fas fa-exclamation-circle me-1"></i>Update CCM: this needs <code>ccm list --json</code>
+      (re-run CCM's <code>install.sh</code>). Plain Claude Code is offered meanwhile.
+    </div>
+    <div *ngIf="d.state?.kind === 'error'" class="small bad">
+      <i class="fas fa-times-circle me-1"></i>{{errorText(d)}}
+    </div>
+    <ng-container *ngIf="d.state?.kind === 'ok'">
+      <div *ngIf="!profilesOf(d).length" class="small text-muted">
+        No CCM Profiles yet — create one with <code>ccm login &lt;name&gt;</code>.
+      </div>
+      <div class="d-flex align-items-center tcs-profile" *ngFor="let p of profilesOf(d)">
+        <div class="flex-grow-1">
+          <strong>{{p.profile}}</strong>
+          <span class="badge bg-secondary ms-2">{{p.kind === 'local' ? 'Local' : 'Published'}}</span>
+          <span class="badge bg-success ms-1" *ngIf="p.active">active</span>
+          <div class="small text-muted">{{p.account}}</div>
+        </div>
+        <button class="btn btn-primary" (click)="openClaude(d, p.profile)">
+          <i class="fas fa-terminal me-1"></i>Open
+        </button>
+      </div>
+      <div class="d-flex align-items-center tcs-profile">
+        <div class="flex-grow-1 text-muted">Active CCM Profile (whatever <code>ccm use</code> selected)</div>
+        <button class="btn btn-secondary" (click)="openClaude(d, null)">Open</button>
+      </div>
+    </ng-container>
+    <div *ngIf="d.state && d.state.kind !== 'ok' && d.state.kind !== 'error'" class="d-flex justify-content-end mt-1">
+      <button class="btn btn-secondary" (click)="openClaude(d, null)">Open Claude Code</button>
+    </div>
+  </div>
+
   <!-- ───────────── Advanced ───────────── -->
   <h4 class="mt-4">Advanced</h4>
   <div class="form-line">
@@ -194,27 +284,86 @@ const STYLES = `
 .tcs-num { width: 110px; flex: none; }
 .tcs-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; flex: none; }
 .ok { color: #22c55e; } .warn { color: #f59e0b; } .bad { color: #ef4444; }
+.tcs-folder { width: 260px; flex: none; }
+.tcs-select { width: 200px; flex: none; }
+.tcs-profile { padding: 6px 0; border-top: 1px solid rgba(128,128,128,.15); }
 `
 
 @Component({
     template: TEMPLATE,
     styles: [STYLES],
 })
-export class ClaudeStateSettingsTabComponent implements OnInit {
+export class ClaudeStateSettingsTabComponent implements OnInit, OnDestroy {
     version = PLUGIN_VERSION
     labels = STATE_LABELS
     toastStates: ClaudeState[] = ['waiting', 'done', 'error']
     colorStates: ClaudeState[] = ['working', 'waiting', 'done', 'error']
     rows: TargetRow[] = []
     loadingTargets = true
+    ccmBusy = false
+    private ccmSub?: Subscription
 
     constructor (
         public config: ConfigService,
         private installer: HookInstallerService,
         private notifier: ClaudeNotifierService,
+        private ccm: CcmService,
+        private profiles: ProfilesService,
+        private notifications: NotificationsService,
         private zone: NgZone,
         private cdr: ChangeDetectorRef,
     ) { }
+
+    ngOnDestroy (): void {
+        this.ccmSub?.unsubscribe()
+    }
+
+    // ── launch ──
+
+    get ccmDistros (): DistroCcm[] {
+        return this.ccm.snapshot
+    }
+
+    visibleCcmDistros (): DistroCcm[] {
+        const only = this.cfg.launch?.distro
+        return this.ccm.snapshot.filter(d => !only || d.target.distro === only)
+    }
+
+    profilesOf (d: DistroCcm): CcmProfile[] {
+        return d.state?.kind === 'ok' ? d.state.list.profiles : []
+    }
+
+    storeText (d: DistroCcm): string {
+        if (d.state?.kind !== 'ok') {
+            return ''
+        }
+        const s = d.state.list.store
+        return !s.enabled || s.status === 'off' ? 'off' : s.status
+    }
+
+    errorText (d: DistroCcm): string {
+        return d.state?.kind === 'error' ? `Couldn't read CCM Profiles: ${d.state.detail}` : ''
+    }
+
+    async refreshCcm (): Promise<void> {
+        this.update(() => { this.ccmBusy = true })
+        try {
+            await this.ccm.refresh()
+        } finally {
+            this.update(() => { this.ccmBusy = false })
+        }
+    }
+
+    async openClaude (d: DistroCcm, profile: string | null): Promise<void> {
+        const id = `local:${shellId(d.target.distro!, profile)}`
+        const all = await this.profiles.getProfiles()
+        const found = all.find(p => p.id === id)
+        if (!found) {
+            this.notifications.error('Claude Code profile not found', 'Turn on "Show Claude Code profiles" and press Refresh.')
+            return
+        }
+        await this.profiles.openNewTabForProfile(found)
+    }
 
     get cfg (): any {
         return (this.config.store as any).claudeState
@@ -225,6 +374,8 @@ export class ClaudeStateSettingsTabComponent implements OnInit {
     }
 
     async ngOnInit (): Promise<void> {
+        this.ccmSub = this.ccm.changed$.subscribe(() => this.update(() => { }))
+        this.refreshCcm().catch(() => { })
         const targets = await this.installer.listTargets()
         this.update(() => {
             this.rows = targets.map(target => ({ target, status: null, busy: true, log: '' }))

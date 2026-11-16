@@ -4,6 +4,9 @@ import { FormsModule } from '@angular/forms'
 import TabbyCoreModule, { ConfigProvider } from 'tabby-core'
 import { TerminalDecorator } from 'tabby-terminal'
 import { SettingsTabProvider } from 'tabby-settings'
+import { ShellProvider } from 'tabby-local'
+import { CcmService } from './ccm.service'
+import { ClaudeShellProvider } from './claudeShells'
 import { ClaudeStateConfigProvider } from './config'
 import { ClaudeStateDecorator } from './decorator'
 import { HookInstallerService } from './hookInstaller.service'
@@ -20,9 +23,11 @@ import { ClaudeStateSettingsTabComponent } from './settingsTab.component'
     providers: [
         ClaudeNotifierService,
         HookInstallerService,
+        CcmService,
         { provide: TerminalDecorator, useClass: ClaudeStateDecorator, multi: true },
         { provide: ConfigProvider, useClass: ClaudeStateConfigProvider, multi: true },
         { provide: SettingsTabProvider, useClass: ClaudeStateSettingsTabProvider, multi: true },
+        { provide: ShellProvider, useClass: ClaudeShellProvider, multi: true },
     ],
     declarations: [
         ClaudeStateSettingsTabComponent,

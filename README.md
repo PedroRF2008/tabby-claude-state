@@ -60,6 +60,28 @@ The state travels inside the tab's own output, so each tab only ever shows its o
 
 Hook mapping: `UserPromptSubmit`/`PreToolUse`/`PostToolUse(Failure)` → working, `PermissionRequest`/`Notification(permission_prompt, elicitation_dialog)` → needs you, `Stop` → done, `StopFailure` → error, `SessionEnd` → idle.
 
+## Open Claude Code as a CCM Profile
+
+If CCM (claude-credentials-manager) is installed in your WSL distro, the plugin adds **"Claude · &lt;profile&gt;"** entries to Tabby's profile picker (**Ctrl+Shift+E**) and New tab menu. There is one entry per CCM Profile, plus **"Claude · Active CCM Profile"**.
+
+Each entry opens a WSL tab running:
+
+```bash
+ccm run '<profile>' -- claude --dangerously-skip-permissions
+```
+
+Each tab runs as its own Account, side by side, and nothing changes which Profile is active globally.
+
+Settings → Claude Code → **4 · Launch Claude Code** lets you:
+
+- pick the distro and the start folder;
+- turn *Skip permission prompts* (`--dangerously-skip-permissions`) on or off; it's on by default;
+- list your CCM Profiles, with an **Open** button for each.
+
+Notifications from these tabs name the Profile, for example "Claude finished · my-app · imp".
+
+This needs a CCM with `ccm list --json`. With an older CCM, or none at all, a plain "Claude Code" entry is offered instead.
+
 ## Multiple accounts (`CLAUDE_CONFIG_DIR`, CCM)
 
 The hook is always installed at `~/.claude/hooks/` and referenced as `"$HOME/.claude/hooks/…"`, so it runs the same under every identity. The installer edits the `settings.json` of `$CLAUDE_CONFIG_DIR` (or `~/.claude`), and if that file is a link it edits the file the link points to.

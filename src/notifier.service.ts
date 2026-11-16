@@ -10,6 +10,8 @@ export interface ToastRequest {
     elapsedMs?: number
     /** Top-level tab (header) to select on click */
     tab?: BaseTabComponent
+    /** CCM Profile the tab runs as (from a "Claude · <profile>" tab), if any */
+    ccmProfile?: string | null
     /** Pane inside a split tab to focus on click */
     pane?: BaseTabComponent
 }
@@ -72,6 +74,9 @@ export class ClaudeNotifierService {
         let title = TITLES[req.state] ?? 'Claude Code'
         if (req.project) {
             title += ` · ${req.project}`
+        }
+        if (req.ccmProfile) {
+            title += ` · ${req.ccmProfile}`
         }
         if (req.state === 'done' && req.elapsedMs && req.elapsedMs >= 1000) {
             title += ` (${formatDuration(req.elapsedMs)})`
