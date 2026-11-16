@@ -2,24 +2,34 @@ import { Observable, Subject } from 'rxjs'
 import { SessionMiddleware } from 'tabby-terminal'
 
 export type ClaudeState = 'working' | 'waiting' | 'done' | 'error' | 'idle'
-const STATES: ClaudeState[] = ['working', 'waiting', 'done', 'error', 'idle']
+export const STATES: ClaudeState[] = ['working', 'waiting', 'done', 'error', 'idle']
 
-const PREFIX = Buffer.from('\x1b]1337;SetUserVar=CLAUDE_STATE=')
-const MAX_BODY = 64          // base64 of the longest state is tiny
+export interface ClaudeStateEvent {
+    state: ClaudeState
+    /** Short human-readable context (permission request, question, final reply…) */
+    message: string
+    /** Project (directory) name of the Claude session */
+    project: string
+}
+
+const PREFIX = Buffer.from('\x1b]1337;SetUserVar=CLAUDE_')
+const MAX_BODY = 2048        // NAME=base64(≤ ~200 chars of UTF-8)
 const FLUSH_MS = 50          // don't hold back a partial match for long
 
 /**
  * Sits at the front of the session middleware stack (ahead of Tabby's own
  * OSCProcessor, which would otherwise swallow OSC 1337), strips our
- * SetUserVar sequence out of the stream and reports the decoded state.
+ * `SetUserVar=CLAUDE_*` sequences out of the stream and reports state changes.
+ * CLAUDE_PROJECT / CLAUDE_MSG are context; CLAUDE_STATE commits an event.
  * All other bytes pass through untouched.
  */
 export class ClaudeStateMiddleware extends SessionMiddleware {
-    get state$ (): Observable<ClaudeState> { return this.state }
+    get state$ (): Observable<ClaudeStateEvent> { return this.state }
 
-    private state = new Subject<ClaudeState>()
+    private state = new Subject<ClaudeStateEvent>()
     private pending: Buffer | null = null
     private flushTimer: ReturnType<typeof setTimeout> | null = null
+    private vars: Record<string, string> = {}
 
     feedFromSession (data: Buffer): void {
         if (this.flushTimer) {
@@ -58,17 +68,12 @@ export class ClaudeStateMiddleware extends SessionMiddleware {
             }
 
             if (term === null) {
-                if (data.length - bodyStart < MAX_BODY) {
-                    // Sequence split across chunks; wait for the rest.
-                    this.pending = data.subarray(start)
-                } else {
-                    // Malformed: pass it through untouched.
-                    out.push(data.subarray(start))
-                }
+                // Sequence split across chunks; wait for the rest.
+                this.pending = data.subarray(start)
                 break
             }
 
-            this.emit(data.subarray(bodyStart, term.index).toString('latin1'))
+            this.handleVar(data.subarray(bodyStart, term.index).toString('latin1'))
             pos = term.index + term.length
         }
 
@@ -97,16 +102,32 @@ export class ClaudeStateMiddleware extends SessionMiddleware {
         super.close()
     }
 
-    private emit (b64: string): void {
-        let value = ''
+    /** body = "<NAME-SUFFIX>=<base64>", e.g. "STATE=d29ya2luZw==" */
+    private handleVar (body: string): void {
+        const eq = body.indexOf('=')
+        if (eq <= 0) {
+            return
+        }
+        const name = body.substring(0, eq)
+        let value: string
         try {
-            value = Buffer.from(b64.trim(), 'base64').toString('utf8').trim()
+            value = Buffer.from(body.substring(eq + 1).trim(), 'base64').toString('utf8').trim()
         } catch {
             return
         }
-        if ((STATES as string[]).includes(value)) {
-            this.state.next(value as ClaudeState)
+
+        if (name !== 'STATE') {
+            this.vars[name] = value
+            return
         }
+        if ((STATES as string[]).includes(value)) {
+            this.state.next({
+                state: value as ClaudeState,
+                message: this.vars.MSG ?? '',
+                project: this.vars.PROJECT ?? '',
+            })
+        }
+        this.vars = {}
     }
 }
 
@@ -117,14 +138,18 @@ export class ClaudeStateMiddleware extends SessionMiddleware {
 function findTerminator (data: Buffer, from: number): { index: number, length: number } | null | 'malformed' {
     const limit = Math.min(data.length, from + MAX_BODY)
     for (let i = from; i < limit; i++) {
-        if (data[i] === 0x07) {
+        const c = data[i]
+        if (c === 0x07) {
             return { index: i, length: 1 }
         }
-        if (data[i] === 0x1b) {
+        if (c === 0x1b) {
             if (i + 1 >= data.length) {
                 return null   // need next chunk to see if it's ESC \
             }
             return data[i + 1] === 0x5c ? { index: i, length: 2 } : 'malformed'
+        }
+        if (c < 0x20) {
+            return 'malformed'  // control chars never appear in NAME=base64
         }
     }
     return limit < from + MAX_BODY ? null : 'malformed'

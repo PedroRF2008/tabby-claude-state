@@ -2,10 +2,19 @@ import { Injectable, NgZone } from '@angular/core'
 import { Subscription } from 'rxjs'
 import { BaseTabComponent, ConfigService, HostWindowService } from 'tabby-core'
 import { BaseTerminalTabComponent, TerminalDecorator } from 'tabby-terminal'
-import { ClaudeState, ClaudeStateMiddleware } from './middleware'
+import { ClaudeState, ClaudeStateEvent, ClaudeStateMiddleware } from './middleware'
+import { ClaudeNotifierService } from './notifier.service'
 
 const SWEEP_INTERVAL_MS = 250
 const SWEEP_STEP = 4
+
+/** Accepts both the v0.1 array form and the v0.2 object form of `flash`. */
+function flashEnabled (flash: any, state: ClaudeState): boolean {
+    if (Array.isArray(flash)) {
+        return flash.includes(state)
+    }
+    return !!flash?.[state]
+}
 
 /** Per-terminal controller: owns the visuals Claude's state puts on the tab header. */
 class TabStateController {
@@ -17,11 +26,13 @@ class TabStateController {
     private sweepValue = 0
     private clearTimer: ReturnType<typeof setTimeout> | null = null
     private focusSubs: Subscription[] = []
+    private workStartedAt: number | null = null
 
     constructor (
         private terminal: BaseTerminalTabComponent<any>,
         private config: ConfigService,
         private hostWindow: HostWindowService,
+        private notifier: ClaudeNotifierService,
         private zone: NgZone,
     ) { }
 
@@ -29,22 +40,38 @@ class TabStateController {
         return (this.config.store as any).claudeState ?? {}
     }
 
-    apply (state: ClaudeState): void {
-        this.zone.run(() => this.applyInZone(state))
+    apply (event: ClaudeStateEvent): void {
+        this.zone.run(() => this.applyInZone(event))
     }
 
     destroy (): void {
         this.reset()
     }
 
-    private applyInZone (state: ClaudeState): void {
+    private applyInZone (event: ClaudeStateEvent): void {
+        const { state } = event
         const cfg = this.cfg
+        const prev = this.state
         if (cfg.debug) {
-            console.log(`[tabby-claude-state] ${this.terminal.title || 'tab'}: ${this.state} -> ${state}`)
+            console.log(`[tabby-claude-state] ${event.project || this.terminal.title || 'tab'}: ${prev} -> ${state}`, event.message)
         }
         if (cfg.enabled === false) {
             return
         }
+
+        // Time how long Claude was busy, for the "done" toast.
+        let elapsedMs: number | undefined
+        if (state === 'working') {
+            this.workStartedAt ??= Date.now()
+        } else {
+            if (this.workStartedAt !== null) {
+                elapsedMs = Date.now() - this.workStartedAt
+            }
+            if (state !== 'waiting') {
+                this.workStartedAt = null   // waiting is mid-turn; keep the clock running
+            }
+        }
+
         if (state === 'idle') {
             this.reset()
             return
@@ -74,12 +101,22 @@ class TabStateController {
             target.displayActivity()
         }
 
-        const windowFocused = typeof document !== 'undefined' && document.hasFocus()
-        if (!windowFocused && Array.isArray(cfg.flash) && cfg.flash.includes(state)) {
-            try {
-                // flashFrame exists in Tabby >= 1.0.238 but not in the published typings.
-                (this.hostWindow as any).flashFrame?.()
-            } catch { /* best effort */ }
+        if (state !== prev && state !== 'working') {
+            const windowFocused = typeof document !== 'undefined' && document.hasFocus()
+            if (!windowFocused && flashEnabled(cfg.flash, state)) {
+                try {
+                    // flashFrame exists in Tabby >= 1.0.238 but not in the published typings.
+                    (this.hostWindow as any).flashFrame?.()
+                } catch { /* best effort */ }
+            }
+            this.notifier.maybeNotify({
+                state,
+                project: event.project,
+                message: event.message,
+                elapsedMs,
+                tab: target,
+                pane: this.terminal,
+            })
         }
 
         if (state === 'done') {
@@ -162,6 +199,7 @@ export class ClaudeStateDecorator extends TerminalDecorator {
     constructor (
         private config: ConfigService,
         private hostWindow: HostWindowService,
+        private notifier: ClaudeNotifierService,
         private zone: NgZone,
     ) {
         super()
@@ -169,13 +207,13 @@ export class ClaudeStateDecorator extends TerminalDecorator {
     }
 
     attach (terminal: BaseTerminalTabComponent<any>): void {
-        const controller = new TabStateController(terminal, this.config, this.hostWindow, this.zone)
+        const controller = new TabStateController(terminal, this.config, this.hostWindow, this.notifier, this.zone)
         this.controllers.set(terminal, controller)
 
         setTimeout(() => {
             this.attachToSession(terminal, controller)
             this.subscribeUntilDetached(terminal, terminal.sessionChanged$.subscribe(() => {
-                controller.apply('idle')
+                controller.apply({ state: 'idle', message: '', project: '' })
                 this.attachToSession(terminal, controller)
             }))
         })
@@ -194,6 +232,6 @@ export class ClaudeStateDecorator extends TerminalDecorator {
         const middleware = new ClaudeStateMiddleware()
         // unshift: must run before Tabby's OSCProcessor, which eats unknown OSC 1337.
         terminal.session.middleware.unshift(middleware)
-        this.subscribeUntilDetached(terminal, middleware.state$.subscribe(state => controller.apply(state)))
+        this.subscribeUntilDetached(terminal, middleware.state$.subscribe(event => controller.apply(event)))
     }
 }
